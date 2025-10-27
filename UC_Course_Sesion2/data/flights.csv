@@ -1,0 +1,13 @@
+flight_id,market,origin,destination,pax_name,pax_email,credit_card,fare_eur,status
+1,EU,BCN,CDG,Ana Lopez,ana.lopez@gmail.com,4111111111111111,120,ON_TIME
+2,EU,MAD,FCO,Luis Perez,luis.perez@gmail.com,4222222222222222,150,DELAYED
+3,EU,BCN,LHR,Maria Gomez,maria.gomez@gmail.com,4333333333333333,95,CANCELLED
+4,EU,MAD,FRA,Javier Ruiz,javier.ruiz@gmail.com,4444444444444444,200,ON_TIME
+5,EU,LIS,AMS,Pedro Silva,pedro.silva@gmail.com,4555555555555555,110,DELAYED
+6,EU,BCN,ORY,Elena Torres,elena.torres@gmail.com,4666666666666666,130,CANCELLED
+7,NA,JFK,MIA,John Smith,john.smith@gmail.com,4777777777777777,200,CANCELLED
+8,NA,ORD,LAX,Susan Miller,susan.miller@gmail.com,4888888888888888,180,ON_TIME
+9,NA,BOS,YYZ,Robert Brown,robert.brown@gmail.com,4999999999999999,140,DELAYED
+10,NA,MIA,ATL,Emily Davis,emily.davis@gmail.com,4000000000000000,160,ON_TIME
+11,NA,JFK,DFW,Michael Johnson,michael.johnson@gmail.com,4011111111111111,250,DELAYED
+12,NA,ORD,DEN,Patricia Wilson,patricia.wilson@gmail.com,4022222222222222,175,CANCELLED
