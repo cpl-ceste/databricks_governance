@@ -1,0 +1,819 @@
+{
+  "datasets": [
+    {
+      "name": "1c7a734a",
+      "displayName": "SummaryCost",
+      "queryLines": [
+        "-- CTE to fetch the latest job metadata per workspace and job\r\n",
+        "WITH latest_job_metadata AS (\r\n",
+        "  SELECT\r\n",
+        "    *,\r\n",
+        "    ROW_NUMBER() OVER (\r\n",
+        "      PARTITION BY workspace_id, job_id \r\n",
+        "      ORDER BY change_time DESC\r\n",
+        "    ) AS rn\r\n",
+        "  FROM\r\n",
+        "    system.lakeflow.jobs\r\n",
+        "  QUALIFY rn = 1\r\n",
+        "),\r\n",
+        "\r\n",
+        "-- CTE to fetch the latest cluster metadata per workspace and cluster\r\n",
+        "latest_clusters_metadata AS (\r\n",
+        "  SELECT\r\n",
+        "    *,\r\n",
+        "    ROW_NUMBER() OVER (\r\n",
+        "      PARTITION BY workspace_id, cluster_id \r\n",
+        "      ORDER BY change_time DESC\r\n",
+        "    ) AS rn\r\n",
+        "  FROM\r\n",
+        "    system.compute.clusters\r\n",
+        "  QUALIFY rn = 1\r\n",
+        "),\r\n",
+        "\r\n",
+        "-- CTE for job run timeline details\r\n",
+        "jrt AS (\r\n",
+        "  SELECT\r\n",
+        "    jr.account_id,\r\n",
+        "    jr.workspace_id,\r\n",
+        "    jr.job_id,\r\n",
+        "    j.name AS job_name,\r\n",
+        "    j.creator_id,\r\n",
+        "    j.run_as,\r\n",
+        "    jr.run_id,\r\n",
+        "    jr.period_start_time,\r\n",
+        "    jr.period_end_time,\r\n",
+        "    jr.trigger_type,\r\n",
+        "    jr.run_type,\r\n",
+        "    jr.result_state AS result_state,\r\n",
+        "    jr.compute_ids,\r\n",
+        "    (UNIX_TIMESTAMP(jr.period_end_time) - UNIX_TIMESTAMP(jr.period_start_time)) / 60 AS duration_minutes,\r\n",
+        "    CASE WHEN jr.result_state = 'SUCCEEDED' THEN jr.run_id ELSE NULL END AS success_run_ids,\r\n",
+        "    CASE WHEN jr.result_state <> 'SUCCEEDED' THEN jr.run_id ELSE NULL END AS failure_run_ids\r\n",
+        "  FROM\r\n",
+        "    system.lakeflow.job_run_timeline jr\r\n",
+        "  JOIN latest_job_metadata j ON jr.job_id = j.job_id\r\n",
+        "  WHERE\r\n",
+        "    jr.period_start_time >= DATE(:start_date)\r\n",
+        "    AND jr.period_start_time < DATE(:end_date) + INTERVAL 1 day\r\n",
+        "),\r\n",
+        "\r\n",
+        "-- CTE for pricing\r\n",
+        "pricing AS (\r\n",
+        "  SELECT\r\n",
+        "    p.pricing.effective_list.default AS price_per_unit,\r\n",
+        "    p.price_start_time,\r\n",
+        "    p.sku_name,\r\n",
+        "    COALESCE(p.price_end_time, NOW()) AS price_end_time\r\n",
+        "  FROM\r\n",
+        "    system.billing.list_prices p\r\n",
+        "),\r\n",
+        "\r\n",
+        "-- CTE with user info, usage, pricing\r\n",
+        "usage_with_names AS (\r\n",
+        "  SELECT\r\n",
+        "    u.account_id,\r\n",
+        "    u.workspace_id,\r\n",
+        "    u.usage_metadata['job_id'] AS job_id,\r\n",
+        "    DATE(u.usage_date) AS usage_date,\r\n",
+        "    u.sku_name,\r\n",
+        "    TRANSFORM(\r\n",
+        "      MAP_KEYS(custom_tags), (k, i) -> CONCAT(\r\n",
+        "        lower(k),\r\n",
+        "        '=',\r\n",
+        "        lower(MAP_VALUES(custom_tags)[i])\r\n",
+        "      )\r\n",
+        "    ) AS key_value_tags,\r\n",
+        "    u.usage_metadata,\r\n",
+        "    jrt.job_name,\r\n",
+        "    CASE \r\n",
+        "      WHEN REGEXP_REPLACE(\r\n",
+        "        u.identity_metadata.run_as,\r\n",
+        "        '([a-zA-Z]+)\\\\.([a-zA-Z]+)@.*',\r\n",
+        "        '$1 $2'\r\n",
+        "      ) = u.identity_metadata.run_as THEN u.identity_metadata.run_as\r\n",
+        "      ELSE INITCAP(\r\n",
+        "        REGEXP_REPLACE(\r\n",
+        "          u.identity_metadata.run_as,\r\n",
+        "          '([a-zA-Z]+)\\\\.([a-zA-Z]+)@.*',\r\n",
+        "          '$1 $2'\r\n",
+        "        )\r\n",
+        "      )\r\n",
+        "    END AS user_name_cleaned,\r\n",
+        "    jrt.run_id,\r\n",
+        "    jrt.success_run_ids,\r\n",
+        "    jrt.failure_run_ids,\r\n",
+        "    jrt.duration_minutes,\r\n",
+        "    jrt.result_state,\r\n",
+        "    jrt.trigger_type,\r\n",
+        "    SUM(u.usage_quantity) AS usage_quantity, \r\n",
+        "    SUM(u.usage_quantity * p.price_per_unit) AS dollar_cost\r\n",
+        "  FROM\r\n",
+        "    system.billing.usage u\r\n",
+        "  LEFT OUTER JOIN jrt ON u.usage_metadata['job_run_id'] = jrt.run_id\r\n",
+        "    AND u.usage_metadata['job_id'] = jrt.job_id\r\n",
+        "    AND u.usage_start_time >= DATE_TRUNC(\"HOUR\", jrt.period_start_time)\r\n",
+        "    AND u.usage_end_time < DATE_TRUNC(\"HOUR\", jrt.period_end_time) + INTERVAL 1 HOUR\r\n",
+        "  INNER JOIN pricing p ON u.sku_name = p.sku_name\r\n",
+        "    AND u.usage_start_time BETWEEN p.price_start_time AND p.price_end_time\r\n",
+        "  WHERE\r\n",
+        "    u.billing_origin_product = 'JOBS'\r\n",
+        "    AND u.usage_date >= DATE(:start_date)\r\n",
+        "    AND u.usage_date < DATE(:end_date) + INTERVAL 1 day\r\n",
+        "    AND (\r\n",
+        "      :tags = 'All'\r\n",
+        "      OR array_contains(\r\n",
+        "        TRANSFORM(\r\n",
+        "          MAP_KEYS(custom_tags), (k, i) -> CONCAT(\r\n",
+        "            lower(k),\r\n",
+        "            '=',\r\n",
+        "            lower(MAP_VALUES(custom_tags)[i])\r\n",
+        "          )\r\n",
+        "        ),\r\n",
+        "        :tags\r\n",
+        "      )\r\n",
+        "    )\r\n",
+        "  GROUP BY ALL\r\n",
+        "),\r\n",
+        "\r\n",
+        "-- Top k jobs per date\r\n",
+        "top_jobs_raw AS (\r\n",
+        "  SELECT\r\n",
+        "    usage_date,\r\n",
+        "    job_name,\r\n",
+        "    SUM(usage_quantity) AS total_usage\r\n",
+        "  FROM usage_with_names\r\n",
+        "  GROUP BY usage_date, job_name\r\n",
+        "),\r\n",
+        "top_jobs AS (\r\n",
+        "  SELECT *\r\n",
+        "  FROM (\r\n",
+        "    SELECT *,\r\n",
+        "           ROW_NUMBER() OVER (PARTITION BY usage_date ORDER BY total_usage DESC) AS rn\r\n",
+        "    FROM top_jobs_raw\r\n",
+        "  ) t\r\n",
+        "  WHERE rn <= :top_k\r\n",
+        "),\r\n",
+        "\r\n",
+        "-- Top k users per date\r\n",
+        "top_users_raw AS (\r\n",
+        "  SELECT\r\n",
+        "    usage_date,\r\n",
+        "    user_name_cleaned AS user,\r\n",
+        "    SUM(usage_quantity) AS total_usage\r\n",
+        "  FROM usage_with_names\r\n",
+        "  GROUP BY usage_date, user_name_cleaned\r\n",
+        "),\r\n",
+        "top_users AS (\r\n",
+        "  SELECT *\r\n",
+        "  FROM (\r\n",
+        "    SELECT *,\r\n",
+        "           ROW_NUMBER() OVER (PARTITION BY usage_date ORDER BY total_usage DESC) AS rn\r\n",
+        "    FROM top_users_raw\r\n",
+        "  ) t\r\n",
+        "  WHERE rn <= :top_k\r\n",
+        ")\r\n",
+        "\r\n",
+        "-- Final output\r\n",
+        "SELECT\r\n",
+        "  uwn.account_id,\r\n",
+        "  uwn.workspace_id,\r\n",
+        "  uwn.usage_date,\r\n",
+        "  uwn.usage_quantity,\r\n",
+        "  uwn.sku_name,\r\n",
+        "  key_value_tags,\r\n",
+        "  uwn.job_id,\r\n",
+        "  uwn.job_name,\r\n",
+        "  uwn.run_id,\r\n",
+        "  uwn.success_run_ids,\r\n",
+        "  uwn.failure_run_ids,\r\n",
+        "  uwn.result_state,\r\n",
+        "  uwn.user_name_cleaned AS user,\r\n",
+        "  CASE\r\n",
+        "    WHEN EXISTS (\r\n",
+        "      SELECT 1 FROM top_jobs tj\r\n",
+        "      WHERE tj.usage_date = uwn.usage_date AND tj.job_name = uwn.job_name\r\n",
+        "    ) THEN uwn.job_name\r\n",
+        "    ELSE 'All Others'\r\n",
+        "  END AS job_name_group,\r\n",
+        "  CASE\r\n",
+        "    WHEN EXISTS (\r\n",
+        "      SELECT 1 FROM top_users tu\r\n",
+        "      WHERE tu.usage_date = uwn.usage_date AND tu.user = uwn.user_name_cleaned\r\n",
+        "    ) THEN uwn.user_name_cleaned\r\n",
+        "    ELSE 'All Others'\r\n",
+        "  END AS user_group,\r\n",
+        "  uwn.duration_minutes,\r\n",
+        "  uwn.trigger_type,\r\n",
+        "  uwn.dollar_cost\r\n",
+        "FROM\r\n",
+        "  usage_with_names uwn"
+      ],
+      "parameters": [
+        {
+          "displayName": "start_date",
+          "keyword": "start_date",
+          "dataType": "DATE",
+          "defaultSelection": {
+            "values": {
+              "dataType": "DATE",
+              "values": [
+                {
+                  "value": "now-30d/d"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "end_date",
+          "keyword": "end_date",
+          "dataType": "DATE",
+          "defaultSelection": {
+            "values": {
+              "dataType": "DATE",
+              "values": [
+                {
+                  "value": "now/d"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "tags",
+          "keyword": "tags",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "All"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "top_k",
+          "keyword": "top_k",
+          "dataType": "INTEGER",
+          "defaultSelection": {
+            "values": {
+              "dataType": "INTEGER",
+              "values": [
+                {
+                  "value": "10"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "e85b3555",
+      "displayName": "SummaryCost",
+      "layout": [
+        {
+          "widget": {
+            "name": "41dcf55b",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "1c7a734a",
+                  "fields": [
+                    {
+                      "name": "countdistinct(run_id)",
+                      "expression": "COUNT(DISTINCT `run_id`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "countdistinct(run_id)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Total Jobs Executed (Jobs u)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 1,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "da4716ba",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "1c7a734a",
+                  "fields": [
+                    {
+                      "name": "sum(usage_quantity)",
+                      "expression": "SUM(`usage_quantity`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(usage_quantity)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Total DBUs Consumed (DBUs)"
+              }
+            }
+          },
+          "position": {
+            "x": 1,
+            "y": 0,
+            "width": 1,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "c0470371",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "1c7a734a",
+                  "fields": [
+                    {
+                      "name": "sum(dollar_cost)",
+                      "expression": "SUM(`dollar_cost`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(dollar_cost)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Total DBUs Consumed ($)"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 0,
+            "width": 1,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "58bb2089",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "1c7a734a",
+                  "fields": [
+                    {
+                      "name": "avg(duration_minutes)",
+                      "expression": "AVG(`duration_minutes`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "avg(duration_minutes)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Average Job Duration (mins)"
+              }
+            }
+          },
+          "position": {
+            "x": 5,
+            "y": 0,
+            "width": 1,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "a7992cfd",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "1c7a734a",
+                  "fields": [
+                    {
+                      "name": "sum(dollar_cost)",
+                      "expression": "SUM(`dollar_cost`)"
+                    },
+                    {
+                      "name": "job_name_group",
+                      "expression": "`job_name_group`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "sum(dollar_cost)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "y": {
+                  "fieldName": "job_name_group",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "label": {
+                  "show": true
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "e2bc0662",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "1c7a734a",
+                  "fields": [
+                    {
+                      "name": "sum(dollar_cost)",
+                      "expression": "SUM(`dollar_cost`)"
+                    },
+                    {
+                      "name": "result_state",
+                      "expression": "`result_state`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "pie",
+              "encodings": {
+                "angle": {
+                  "fieldName": "sum(dollar_cost)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "result_state",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "ERROR",
+                        "color": {
+                          "themeColorType": "visualizationColors",
+                          "position": 4
+                        }
+                      },
+                      {
+                        "value": "CANCELLED",
+                        "color": {
+                          "themeColorType": "visualizationColors",
+                          "position": 1
+                        }
+                      },
+                      {
+                        "value": "SUCCEEDED",
+                        "color": {
+                          "themeColorType": "visualizationColors",
+                          "position": 7
+                        }
+                      }
+                    ]
+                  }
+                },
+                "label": {
+                  "show": true
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Job Status"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 3,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "10075fad",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "1c7a734a",
+                  "fields": [
+                    {
+                      "name": "job_name_group",
+                      "expression": "`job_name_group`"
+                    },
+                    {
+                      "name": "daily(usage_date)",
+                      "expression": "DATE_TRUNC(\"DAY\", `usage_date`)"
+                    },
+                    {
+                      "name": "sum(dollar_cost)",
+                      "expression": "SUM(`dollar_cost`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "daily(usage_date)",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(dollar_cost)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "job_name_group",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "label": {
+                  "show": true
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 9,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "1c811d9c",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "1c7a734a",
+                  "fields": [
+                    {
+                      "name": "result_state",
+                      "expression": "`result_state`"
+                    },
+                    {
+                      "name": "daily(usage_date)",
+                      "expression": "DATE_TRUNC(\"DAY\", `usage_date`)"
+                    },
+                    {
+                      "name": "countdistinct(run_id)",
+                      "expression": "COUNT(DISTINCT `run_id`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "daily(usage_date)",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fieldName": "countdistinct(run_id)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "result_state",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "SUCCEEDED",
+                        "color": {
+                          "themeColorType": "visualizationColors",
+                          "position": 8
+                        }
+                      },
+                      {
+                        "value": "ERROR",
+                        "color": {
+                          "themeColorType": "visualizationColors",
+                          "position": 4
+                        }
+                      }
+                    ]
+                  }
+                },
+                "label": {
+                  "show": true
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 15,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "894ac7e5",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "1c7a734a",
+                  "fields": [
+                    {
+                      "name": "job_name",
+                      "expression": "`job_name`"
+                    },
+                    {
+                      "name": "user",
+                      "expression": "`user`"
+                    },
+                    {
+                      "name": "workspace_id",
+                      "expression": "`workspace_id`"
+                    },
+                    {
+                      "name": "result_state",
+                      "expression": "`result_state`"
+                    },
+                    {
+                      "name": "sum(dollar_cost)",
+                      "expression": "SUM(`dollar_cost`)"
+                    }
+                  ],
+                  "cubeGroupingSets": {
+                    "sets": [
+                      {
+                        "fieldNames": [
+                          "job_name",
+                          "user",
+                          "workspace_id"
+                        ]
+                      },
+                      {
+                        "fieldNames": [
+                          "result_state"
+                        ]
+                      }
+                    ]
+                  },
+                  "disaggregated": false,
+                  "orders": [
+                    {
+                      "direction": "ASC",
+                      "expression": "`job_name`"
+                    },
+                    {
+                      "direction": "ASC",
+                      "expression": "`user`"
+                    },
+                    {
+                      "direction": "ASC",
+                      "expression": "`workspace_id`"
+                    },
+                    {
+                      "direction": "ASC",
+                      "expression": "`result_state`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "pivot",
+              "encodings": {
+                "rows": [
+                  {
+                    "fieldName": "job_name"
+                  },
+                  {
+                    "fieldName": "user"
+                  },
+                  {
+                    "fieldName": "workspace_id"
+                  }
+                ],
+                "columns": [
+                  {
+                    "fieldName": "result_state"
+                  }
+                ],
+                "cell": {
+                  "type": "multi-cell",
+                  "fields": [
+                    {
+                      "fieldName": "sum(dollar_cost)",
+                      "cellType": "text"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 21,
+            "width": 6,
+            "height": 6
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS"
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "widgetHeaderAlignment": "ALIGNMENT_UNSPECIFIED"
+    }
+  }
+}

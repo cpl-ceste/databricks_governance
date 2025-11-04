@@ -1,0 +1,9 @@
+phase_key,phase_name,category,exp_ias_min_kts,exp_ias_max_kts,exp_alt_min_ft,exp_alt_max_ft,description
+PARKED,Parked,ground,,,-1000,100,Aircraft at gate/standstill
+TAXI,Taxi,ground,0.0,30.0,-1000,200,Ground movement to/from runway
+TAKEOFF,Takeoff,air,80.0,200.0,0,3000,Acceleration and liftoff
+CLIMB,Climb,air,150.0,350.0,1000,20000,Climb to cruise altitude
+CRUISE,Cruise,air,200.0,550.0,10000,45000,Level flight at cruise altitude
+DESCENT,Descent,air,150.0,450.0,500,35000,Descent from cruise
+APPROACH,Approach,air,120.0,250.0,0,8000,Final approach procedures
+LANDING,Landing,air,80.0,180.0,0,2000,Touchdown and rollout

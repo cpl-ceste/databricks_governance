@@ -1,0 +1,467 @@
+{
+  "dim_aircraft": {
+    "columns": [
+      {
+        "name": "aircraft_id",
+        "type": "string",
+        "nullable": false,
+        "description": "Unique aircraft identifier used across datasets."
+      },
+      {
+        "name": "tail_number",
+        "type": "string",
+        "nullable": true,
+        "description": "Aircraft registration/tail number visible on the fuselage."
+      },
+      {
+        "name": "model",
+        "type": "string",
+        "nullable": true,
+        "description": "Aircraft model name or code (e.g., A320-214)."
+      },
+      {
+        "name": "manufacturer",
+        "type": "string",
+        "nullable": true,
+        "description": "Aircraft manufacturer (e.g., Airbus, Boeing)."
+      },
+      {
+        "name": "engine_model",
+        "type": "string",
+        "nullable": false,
+        "description": "Installed engine model family (e.g., CFM56-5B)."
+      },
+      {
+        "name": "first_service_dt",
+        "type": "string",
+        "nullable": true,
+        "description": "Date when the aircraft entered commercial service."
+      },
+      {
+        "name": "status",
+        "type": "string",
+        "nullable": true,
+        "description": "Current operational status (e.g., Active, Maintenance, Retired)."
+      },
+      {
+        "name": "cycles_total",
+        "type": "long",
+        "nullable": true,
+        "description": "Total takeoff-landing cycles accumulated by the aircraft."
+      },
+      {
+        "name": "hours_total",
+        "type": "double",
+        "nullable": true,
+        "description": "Total flight hours accumulated by the aircraft."
+      }
+    ],
+    "expected_columns": [
+      "aircraft_id",
+      "tail_number",
+      "model",
+      "manufacturer",
+      "engine_model",
+      "first_service_dt",
+      "status",
+      "cycles_total",
+      "hours_total"
+    ],
+    "pk": [
+      "aircraft_id"
+    ],
+    "numeric_ranges": {
+      "cycles_total": [
+        0,
+        100000
+      ],
+      "hours_total": [
+        0,
+        200000
+      ]
+    },
+    "date_non_future": ""
+  },
+  "fact_engine_sensor": {
+    "columns": [
+      {
+        "name": "reading_id",
+        "type": "string",
+        "nullable": false,
+        "description": "Unique identifier of the sensor reading record."
+      },
+      {
+        "name": "aircraft_id",
+        "type": "string",
+        "nullable": false,
+        "description": "Foreign key referencing the aircraft associated with the reading."
+      },
+      {
+        "name": "event_ts",
+        "type": "string",
+        "nullable": true,
+        "description": "UTC timestamp when the reading was captured."
+      },
+      {
+        "name": "event_date",
+        "type": "timestamp",
+        "nullable": true,
+        "description": ""
+      },
+      {
+        "name": "engine_pos",
+        "type": "long",
+        "nullable": true,
+        "description": "Engine position on the wing or tail (e.g., 1 = left, 2 = right)."
+      },
+      {
+        "name": "phase_of_flight",
+        "type": "string",
+        "nullable": false,
+        "description": "Flight phase label for the reading (Taxi, Takeoff, Cruise, etc.)."
+      },
+      {
+        "name": "altitude_ft",
+        "type": "long",
+        "nullable": true,
+        "description": "Pressure altitude at the time of the reading (feet)."
+      },
+      {
+        "name": "ias_kts",
+        "type": "long",
+        "nullable": true,
+        "description": "Indicated airspeed at the time of the reading (knots)."
+      },
+      {
+        "name": "egt_c",
+        "type": "double",
+        "nullable": true,
+        "description": "Exhaust gas temperature measured by engine sensors (°C)."
+      },
+      {
+        "name": "n1_pct",
+        "type": "double",
+        "nullable": true,
+        "description": ""
+      },
+      {
+        "name": "fuel_flow_kg_h",
+        "type": "double",
+        "nullable": true,
+        "description": "Estimated fuel flow rate at the time of reading (kg/h)."
+      },
+      {
+        "name": "vib_ips",
+        "type": "double",
+        "nullable": true,
+        "description": "Engine vibration level (inches per second, IPS)."
+      }
+    ],
+    "expected_columns": [
+      "reading_id",
+      "aircraft_id",
+      "event_ts",
+      "event_date",
+      "engine_pos",
+      "phase_of_flight",
+      "altitude_ft",
+      "ias_kts",
+      "egt_c",
+      "n1_pct",
+      "fuel_flow_kg_h",
+      "vib_ips"
+    ],
+    "pk": [
+      "reading_id"
+    ],
+    "numeric_ranges": {
+      "egt_c": [
+        0,
+        1200
+      ],
+      "fuel_flow_kg_h": [
+        0,
+        6000
+      ],
+      "vib_ips": [
+        0,
+        5
+      ],
+      "altitude_ft": [
+        -1000,
+        50000
+      ],
+      "ias_kts": [
+        0,
+        600
+      ]
+    },
+    "date_non_future": ""
+  },
+  "fact_maintenance_event": {
+    "columns": [
+      {
+        "name": "event_id",
+        "type": "string",
+        "nullable": false,
+        "description": "Unique identifier of the maintenance event."
+      },
+      {
+        "name": "aircraft_id",
+        "type": "string",
+        "nullable": true,
+        "description": "Foreign key referencing the affected aircraft."
+      },
+      {
+        "name": "event_ts",
+        "type": "string",
+        "nullable": true,
+        "description": "UTC timestamp when the maintenance event occurred."
+      },
+      {
+        "name": "event_date",
+        "type": "timestamp",
+        "nullable": true,
+        "description": ""
+      },
+      {
+        "name": "event_type",
+        "type": "string",
+        "nullable": true,
+        "description": "Type/category of maintenance (Inspection, A-Check, Unscheduled, etc.)."
+      },
+      {
+        "name": "ata_chapter",
+        "type": "string",
+        "nullable": true,
+        "description": "ATA chapter code indicating the system/component involved (e.g., 72)."
+      },
+      {
+        "name": "defect_code",
+        "type": "string",
+        "nullable": true,
+        "description": "Internal defect or fault code reported by maintenance."
+      },
+      {
+        "name": "severity",
+        "type": "string",
+        "nullable": true,
+        "description": "Event severity classification (Low, Medium, High, Critical)."
+      },
+      {
+        "name": "grounded",
+        "type": "boolean",
+        "nullable": true,
+        "description": "Indicates whether the aircraft was grounded (AOG) due to the event."
+      },
+      {
+        "name": "workorder_id",
+        "type": "string",
+        "nullable": true,
+        "description": "Identifier of the maintenance work order from MRO/ERP."
+      },
+      {
+        "name": "duration_min",
+        "type": "long",
+        "nullable": true,
+        "description": "Total duration of the maintenance action (minutes)."
+      },
+      {
+        "name": "description",
+        "type": "string",
+        "nullable": true,
+        "description": "Free-text, short description of the event or action taken."
+      },
+      {
+        "name": "next_due_cycles",
+        "type": "double",
+        "nullable": true,
+        "description": "Cycles remaining until the next scheduled maintenance."
+      },
+      {
+        "name": "next_due_hours",
+        "type": "double",
+        "nullable": true,
+        "description": "Flight hours remaining until the next scheduled maintenance."
+      }
+    ],
+    "expected_columns": [
+      "event_id",
+      "aircraft_id",
+      "event_ts",
+      "event_date",
+      "event_type",
+      "ata_chapter",
+      "defect_code",
+      "severity",
+      "grounded",
+      "workorder_id",
+      "duration_min",
+      "description",
+      "next_due_cycles",
+      "next_due_hours"
+    ],
+    "pk": [
+      "event_id"
+    ],
+    "numeric_ranges": {
+      "duration_min": [
+        0,
+        2880
+      ],
+      "next_due_cycles": [
+        0,
+        10000
+      ],
+      "next_due_hours": [
+        0,
+        50000
+      ]
+    },
+    "date_non_future": ""
+  },
+  "dim_sensor_reading": {
+    "columns": [
+      {
+        "name": "reading_id",
+        "type": "string",
+        "nullable": false,
+        "description": "Unique reading identifier (joins to fact_engine_sensor.reading_id)."
+      },
+      {
+        "name": "sensor_type",
+        "type": "string",
+        "nullable": false,
+        "description": "Type of sensor reading (IAS, ALT, OAT)."
+      },
+      {
+        "name": "unit",
+        "type": "string",
+        "nullable": false,
+        "description": "Measurement unit associated to sensor_type."
+      },
+      {
+        "name": "quality_flag",
+        "type": "string",
+        "nullable": false,
+        "description": "Quality status for the reading (OK/SUSPECT/BAD)."
+      },
+      {
+        "name": "source_system",
+        "type": "string",
+        "nullable": false,
+        "description": "Source system of the reading (ACMS/FDR)."
+      },
+      {
+        "name": "calibration_version",
+        "type": "string",
+        "nullable": true,
+        "description": "Calibration bundle version if applicable."
+      },
+      {
+        "name": "reading_ts",
+        "type": "timestamp",
+        "nullable": false,
+        "description": "Timestamp of the reading (UTC)."
+      }
+    ],
+    "expected_columns": [
+      "reading_id",
+      "sensor_type",
+      "unit",
+      "quality_flag",
+      "source_system",
+      "calibration_version",
+      "reading_ts"
+    ],
+    "pk": [
+      "reading_id"
+    ],
+    "numeric_ranges": {},
+    "date_non_future": ""
+  },
+  "dim_phase": {
+    "columns": [
+      {
+        "name": "phase_key",
+        "type": "string",
+        "nullable": false,
+        "description": "Normalized key for phase of flight (e.g., CLIMB)."
+      },
+      {
+        "name": "phase_name",
+        "type": "string",
+        "nullable": false,
+        "description": "Human-readable phase name."
+      },
+      {
+        "name": "category",
+        "type": "string",
+        "nullable": false,
+        "description": "ground | air"
+      },
+      {
+        "name": "exp_ias_min_kts",
+        "type": "integer",
+        "nullable": true,
+        "description": "Expected IAS min for this phase (kts)."
+      },
+      {
+        "name": "exp_ias_max_kts",
+        "type": "integer",
+        "nullable": true,
+        "description": "Expected IAS max for this phase (kts)."
+      },
+      {
+        "name": "exp_alt_min_ft",
+        "type": "integer",
+        "nullable": true,
+        "description": "Expected altitude min for this phase (ft)."
+      },
+      {
+        "name": "exp_alt_max_ft",
+        "type": "integer",
+        "nullable": true,
+        "description": "Expected altitude max for this phase (ft)."
+      },
+      {
+        "name": "description",
+        "type": "string",
+        "nullable": true,
+        "description": "Short description of the phase."
+      }
+    ],
+    "expected_columns": [
+      "phase_key",
+      "phase_name",
+      "category",
+      "exp_ias_min_kts",
+      "exp_ias_max_kts",
+      "exp_alt_min_ft",
+      "exp_alt_max_ft",
+      "description"
+    ],
+    "pk": [
+      "phase_key"
+    ],
+    "numeric_ranges": {
+      "exp_ias_min_kts": [
+        0,
+        700
+      ],
+      "exp_ias_max_kts": [
+        0,
+        700
+      ],
+      "exp_alt_min_ft": [
+        -1000,
+        50000
+      ],
+      "exp_alt_max_ft": [
+        -1000,
+        50000
+      ]
+    },
+    "date_non_future": ""
+  }
+}
